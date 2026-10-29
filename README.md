@@ -10,7 +10,8 @@ Day-to-day progress is tracked in [`TASKS.md`](./TASKS.md).
 
 Next.js (App Router, TypeScript) · Supabase (Postgres) · Tailwind CSS ·
 Vercel Cron (daily Supabase keep-alive) · `convert-units` for unit
-conversion.
+conversion · `cheerio`/`@mozilla/readability`/`jsdom` + Groq/Gemini/Mistral
+SDKs for recipe extraction.
 
 Single-user app: there's no Supabase Auth / multi-tenant login, just one
 shared password gated by `src/proxy.ts`.
@@ -48,6 +49,9 @@ See [`.env.example`](./.env.example). You'll need:
 - Any random string for `CRON_SECRET` (set the same value in Vercel's
   project env vars once deployed — it's how `/api/cron/keep-alive`
   authenticates Vercel Cron's requests).
+- Optionally, any combination of `GROQ_API_KEY` / `GEMINI_API_KEY` /
+  `MISTRAL_API_KEY` for the recipe-extraction LLM fallback (section below) —
+  all free-tier, all optional, each tried only if its key is set.
 
 **Gotcha:** Supabase free-tier projects auto-pause after ~7 days with no
 activity. The daily Vercel Cron job hitting `/api/cron/keep-alive` exists
@@ -84,15 +88,42 @@ auto-pause. It's exempted from the `/src/proxy.ts` password gate (cron
 requests carry no login cookie) and instead checks a `CRON_SECRET` bearer
 token.
 
+## Recipe ingestion (Phase 3)
+
+`/recipes` takes a URL and `POST`s it to `/api/recipes`, which:
+
+1. Checks `recipes` by `source_url` first — an exact match is returned
+   immediately (`cached: true`), no re-fetch.
+2. Otherwise fetches the page and tries, in order:
+   - **Structured extraction** (`src/lib/recipes/extractStructured.ts`) —
+     parses schema.org `Recipe` JSON-LD via `cheerio`. No API cost, no rate
+     limit, succeeds on most recipe sites.
+   - **LLM fallback** (`extractLLM.ts`) — tries Groq, then Gemini, then
+     Mistral, skipping any provider without an API key configured.
+   - **Readability fallback** (`extractReadability.ts`) — `@mozilla/readability`
+     + `jsdom` for clean article text, splitting on "Ingredients"/"Instructions"
+     headings when present.
+3. Saves the result to `recipes`/`recipe_ingredients`, recording which
+   engine succeeded in `extraction_method`.
+
+All three extraction paths are implemented and the structured + Readability
+paths are verified (see [`TASKS.md`](./TASKS.md)); the LLM fallback hasn't
+been exercised against a live provider yet since no API key is configured.
+
 ## Project structure
 
 ```
 src/
   app/
     products/           Manual price/aisle entry UI
+    recipes/            Recipe URL input + saved-recipes list UI
     api/products/        Upsert products + append price_history
+    api/recipes/         DB-check-first, structured/LLM/Readability chain
     api/cron/keep-alive/ Daily Supabase keep-alive (Vercel Cron)
-  lib/supabase/   Server-only Supabase client (admin.ts, service-role key)
+  lib/
+    supabase/       Server-only Supabase client (admin.ts, service-role key)
+    recipes/        Extraction engines: extractStructured, extractLLM,
+                    extractReadability, parseIngredientLine, types
   types/          Hand-maintained Database type for Supabase queries
   proxy.ts        Shared-password auth gate (Next.js 16 "proxy" convention,
                   formerly "middleware"); exempts /api/login and /api/cron
@@ -111,8 +142,9 @@ pnpm lint    # eslint
 
 ## Status
 
-Phase 1 (Supabase & Next.js scaffold) complete. Phase 2 pivoted from an
-automated scraper (blocked by both retailers' bot-detection, confirmed via
-testing) to manual price entry + Vercel Cron keep-alive — code complete,
-needs the new migration applied and `CRON_SECRET` set in Vercel. See
+Phase 1 (Supabase & Next.js scaffold) complete. Phase 2 (manual price entry
++ keep-alive) complete and verified. Phase 3 (recipe ingestion) complete and
+verified for the structured + Readability paths; LLM fallback is built but
+untested against a live provider (no API key configured yet). Nothing is
+deployed to Vercel yet — everything so far only runs locally. See
 [`TASKS.md`](./TASKS.md) for the full phase-by-phase breakdown.

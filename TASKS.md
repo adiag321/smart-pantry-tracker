@@ -45,12 +45,17 @@ techniques — see PRD section 5 for the full writeup.
 
 ## Phase 3: The Recipe Ingestion Engine
 
-- [ ] Build `/api/recipes` route accepting a URL
-- [ ] Implement DB-check-first lookup against `recipes`
-- [ ] Implement primary structured-data parser (`recipe-scrapers` or JSON-LD parsing)
-- [ ] Implement LLM fallback (current-gen free-tier flash model) with strict JSON-extraction prompt
-- [ ] Implement final Readability-style DOM fallback
-- [ ] Record `extraction_method` on save
+- [x] Build `/api/recipes` route (`GET` lists saved recipes, `POST` accepts a URL)
+- [x] Implement DB-check-first lookup against `recipes` by `source_url` (verified: second POST of the same URL returns `cached: true`, no re-fetch)
+- [x] Implement primary structured-data parser — JSON-LD extraction via `cheerio` (`src/lib/recipes/extractStructured.ts`), not Python `recipe-scrapers` (app is single-codebase TypeScript); handles `@graph`/`mainEntity` wrappers and the three `recipeInstructions` shapes schema.org allows
+- [x] Implement shared best-effort ingredient-line parser (`parseIngredientLine.ts`) — splits "2 cups milk" into `{name, amount, unit}`; used by both the structured and Readability paths
+- [x] Implement multi-provider LLM fallback (`extractLLM.ts`) — tries Groq, then Gemini, then Mistral, skipping any without an API key configured; strips markdown code-fences models sometimes wrap JSON in
+- [x] Implement final Readability-style DOM fallback (`extractReadability.ts`) — `@mozilla/readability` + `jsdom`, splits on "Ingredients"/"Instructions" headings when present
+- [x] Record `extraction_method` on save (`structured` / `llm` / `readability`)
+- [x] Build minimal `/recipes` UI page (input bar + saved-recipes list) to exercise the flow
+- [x] Verified end-to-end against a real recipe URL (food.com) — structured path succeeded, HTML entities decoded correctly (`&deg;` → `°`), 9/9 ingredients parsed with sane `{amount, unit, name}` splits, cache-hit path confirmed on second request
+- [x] Readability fallback verified via synthetic HTML test — correctly splits Ingredients/Instructions headings, parses quantities/units, and extracts the page `<title>`
+- [ ] LLM fallback path is implemented but **not yet tested against a live provider** — none of Groq/Gemini/Mistral API keys are configured yet, so this code path has only been exercised by the "no provider configured → falls through to Readability" branch, not a real provider call. Needs a real key set in `.env.local` and a test against a site with no JSON-LD to validate — **user action** to obtain a key
 
 ## Phase 4: Unit Conversion, FIFO & Shopping List Logic
 
