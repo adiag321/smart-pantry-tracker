@@ -39,9 +39,9 @@ techniques — see PRD section 5 for the full writeup.
 - [x] Build `/api/products` route — `GET` lists products, `POST` upserts into `products` and appends to `price_history`
 - [x] Build `/api/cron/keep-alive` route, secured with `CRON_SECRET` bearer token, exempted from the password-gate proxy
 - [x] Add `vercel.json` with a daily Vercel Cron job hitting the keep-alive route
-- [ ] Apply `0003_products_unique_constraint.sql` against the live Supabase project — **user action**, added after the project was first set up
-- [ ] Set `CRON_SECRET` in Vercel's project environment variables (same value as local `.env.local`) once deployed — **user action**, needed before the cron job will authenticate successfully
-- [ ] Clean up now-unused repo secrets `WALMART_STORE_ID` / `HEB_STORE_ID` on GitHub
+- [x] Apply `0003_products_unique_constraint.sql` against the live Supabase project — verified via direct upsert test (constraint present, update-not-duplicate behavior confirmed) and via the real `/api/products` HTTP route end-to-end
+- [x] Clean up now-unused repo secrets (`WALMART_STORE_ID`, `HEB_STORE_ID`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`) on GitHub — no workflow needs them anymore
+- [ ] Deploy to Vercel and set env vars there (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `APP_SHARED_PASSWORD`, `CRON_SECRET`) — **user action**; app currently only runs locally, nothing is live on the internet yet
 
 ## Phase 3: The Recipe Ingestion Engine
 
