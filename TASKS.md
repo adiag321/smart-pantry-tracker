@@ -22,23 +22,26 @@ needs to be split further once work starts.
 - [x] Move `node_modules`/`.next` out of the OneDrive-synced tree (symlinked from `~/Library/pnpm/projects/smart-pantry-tracker`) to stop OneDrive from syncing thousands of package files
 - [x] Pin `dev`/`build` scripts to `--webpack` — Turbopack refuses to resolve `next` itself through a symlinked `node_modules` outside the workspace root ("hermetic build" restriction); switched Tailwind from the Turbopack-loader config to a standard `postcss.config.mjs` + `@tailwindcss/postcss` to match
 
-## Phase 2: The GitHub Action Pipeline
+## Phase 2: Manual Data Entry & Keep-Alive
 
-- [x] Write Python scraping script (Playwright) for Walmart + H-E-B targeted item list (`scripts/scraper/`)
-- [x] Export `walmart_data.csv`, `heb_data.csv`, `price_history.csv` to `data/`
-- [x] Add `.github/workflows/scraper.yml` (weekly Sunday 2am UTC trigger + manual `workflow_dispatch`)
-- [x] Add auto-commit step (`stefanzweifel/git-auto-commit-action`) to reset the 60-day cron-suspension clock
-- [x] Add mandatory Supabase sync/keep-alive call — done directly from the Python script (`sync_supabase.py`) via the service-role key rather than a separate Edge Function/API route, since the script already has the scraped data in memory; the weekly upsert itself is the keep-alive ping
-- [x] Add unique constraint on `products (name, store)` (`0003_products_unique_constraint.sql`) so the upsert has something to target
-- [ ] Set repo secrets: `WALMART_STORE_ID`, `HEB_STORE_ID`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` — **user action**
-- [ ] Run the workflow once manually (`workflow_dispatch`) to confirm selectors still match live site markup and verify the full pipeline end-to-end — **user action**, see "known limitation" note below
-- [ ] (Optional hardening) Add Vercel Cron backup ping to the same keep-alive endpoint — deferred; not needed yet since the Supabase sync above already covers the keep-alive requirement
+**Pivot:** originally scoped as a GitHub Actions + Playwright scraper. Built
+and run against live Walmart/H-E-B — both blocked it outright (Walmart:
+press-and-hold Arkose/FunCaptcha challenge; H-E-B: Akamai bot-manager block
+page), confirmed from a residential IP too so it wasn't just GitHub's
+datacenter IPs being flagged. Walmart's real API needs Seller/Solution-Provider
+partner approval (not available to an individual); H-E-B has no public API.
+Scraper code removed entirely rather than pursuing stealth/evasion
+techniques — see PRD section 5 for the full writeup.
 
-**Known limitation:** the Walmart/H-E-B CSS selectors in `walmart_scraper.py`
-/ `heb_scraper.py` are best-effort against each site's markup as of when
-they were written and have **not** been validated against a live bot-check
-pass (PRD section 5 flags this as expected, ongoing maintenance, not a
-one-time bug). First real run will likely need selector adjustments.
+- [x] Remove `scripts/scraper/`, `.github/workflows/scraper.yml`, `data/`
+- [x] Add unique constraint on `products (name, store)` (`0003_products_unique_constraint.sql`) — now backs the manual-entry upsert instead of a scraper sync
+- [x] Build `/products` manual price/aisle entry form (`src/app/products/page.tsx`)
+- [x] Build `/api/products` route — `GET` lists products, `POST` upserts into `products` and appends to `price_history`
+- [x] Build `/api/cron/keep-alive` route, secured with `CRON_SECRET` bearer token, exempted from the password-gate proxy
+- [x] Add `vercel.json` with a daily Vercel Cron job hitting the keep-alive route
+- [ ] Apply `0003_products_unique_constraint.sql` against the live Supabase project — **user action**, added after the project was first set up
+- [ ] Set `CRON_SECRET` in Vercel's project environment variables (same value as local `.env.local`) once deployed — **user action**, needed before the cron job will authenticate successfully
+- [ ] Clean up now-unused repo secrets `WALMART_STORE_ID` / `HEB_STORE_ID` on GitHub
 
 ## Phase 3: The Recipe Ingestion Engine
 

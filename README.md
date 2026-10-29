@@ -9,11 +9,16 @@ Day-to-day progress is tracked in [`TASKS.md`](./TASKS.md).
 ## Stack
 
 Next.js (App Router, TypeScript) · Supabase (Postgres) · Tailwind CSS ·
-GitHub Actions + Playwright (weekly scrape pipeline, added in Phase 2) ·
-`convert-units` for unit conversion.
+Vercel Cron (daily Supabase keep-alive) · `convert-units` for unit
+conversion.
 
 Single-user app: there's no Supabase Auth / multi-tenant login, just one
 shared password gated by `src/proxy.ts`.
+
+Grocery price/aisle data is entered manually via `/products`, not scraped —
+Walmart and H-E-B both actively block automated access (confirmed by
+testing, see PRD section 5), and neither has a free public API. A Playwright
+scraper pipeline was built and tried first; it's gone now.
 
 ## Getting started
 
@@ -40,10 +45,13 @@ See [`.env.example`](./.env.example). You'll need:
 - A Supabase project (Project Settings → API) for `NEXT_PUBLIC_SUPABASE_URL`,
   `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY`.
 - Any value of your choosing for `APP_SHARED_PASSWORD`.
+- Any random string for `CRON_SECRET` (set the same value in Vercel's
+  project env vars once deployed — it's how `/api/cron/keep-alive`
+  authenticates Vercel Cron's requests).
 
 **Gotcha:** Supabase free-tier projects auto-pause after ~7 days with no
-activity. Once the Phase 2 pipeline is running, its weekly sync doubles as a
-keep-alive ping — see PRD section 5.
+activity. The daily Vercel Cron job hitting `/api/cron/keep-alive` exists
+specifically to prevent this — see PRD section 5.
 
 ## Database migrations
 
@@ -61,36 +69,36 @@ Current migrations:
 |---|---|
 | `0001_init_schema.sql` | `products`, `price_history`, `inventory_batches`, `recipes`, `recipe_ingredients` |
 | `0002_fifo_deduct.sql` | `deduct_inventory_fifo()` — atomic oldest-batch-first deduction |
-| `0003_products_unique_constraint.sql` | Unique `(name, store)` constraint on `products`, needed by the Phase 2 scraper's upsert |
+| `0003_products_unique_constraint.sql` | Unique `(name, store)` constraint on `products`, needed by the manual-entry upsert |
 
-## Weekly data pipeline (Phase 2)
+## Manual price entry & keep-alive (Phase 2)
 
-`.github/workflows/scraper.yml` runs `scripts/scraper/main.py` every Sunday
-at 2am UTC (or on demand via `workflow_dispatch`): scrapes the item list in
-`scripts/scraper/items.yaml` against Walmart and H-E-B, writes CSVs to
-`data/`, upserts into Supabase, and auto-commits the CSVs back to `main`
-(which is also what keeps GitHub from disabling the schedule after 60 days
-of inactivity — see PRD section 5).
+`/products` is a small form for updating prices/aisles by hand — the
+free/legal alternative to scraping (PRD section 5). Submitting it calls
+`POST /api/products`, which upserts into `products` and appends to
+`price_history`.
 
-Requires these repo secrets (Settings → Secrets and variables → Actions):
-`WALMART_STORE_ID`, `HEB_STORE_ID`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
-See [`scripts/scraper/README.md`](./scripts/scraper/README.md) for how to
-find your store IDs and run it locally.
+`/api/cron/keep-alive`, wired up in `vercel.json` as a daily Vercel Cron
+job, does a trivial Supabase read so the free-tier project doesn't
+auto-pause. It's exempted from the `/src/proxy.ts` password gate (cron
+requests carry no login cookie) and instead checks a `CRON_SECRET` bearer
+token.
 
 ## Project structure
 
 ```
 src/
-  app/            Next.js App Router pages & API routes
+  app/
+    products/           Manual price/aisle entry UI
+    api/products/        Upsert products + append price_history
+    api/cron/keep-alive/ Daily Supabase keep-alive (Vercel Cron)
   lib/supabase/   Server-only Supabase client (admin.ts, service-role key)
   types/          Hand-maintained Database type for Supabase queries
   proxy.ts        Shared-password auth gate (Next.js 16 "proxy" convention,
-                  formerly "middleware")
+                  formerly "middleware"); exempts /api/login and /api/cron
 supabase/
   migrations/     SQL migrations, applied in order
-scripts/scraper/  Python/Playwright weekly scrape pipeline (Phase 2)
-data/             CSV output from the weekly scrape, auto-committed
-.github/workflows/scraper.yml   Weekly schedule + auto-commit
+vercel.json       Daily cron schedule for /api/cron/keep-alive
 ```
 
 ## Scripts
@@ -103,8 +111,8 @@ pnpm lint    # eslint
 
 ## Status
 
-Phase 1 (Supabase & Next.js scaffold) complete. Phase 2 (GitHub Action
-pipeline) code complete, not yet run against live sites — needs repo
-secrets set and a first `workflow_dispatch` run to validate scraper
-selectors. See [`TASKS.md`](./TASKS.md) for the full phase-by-phase
-breakdown.
+Phase 1 (Supabase & Next.js scaffold) complete. Phase 2 pivoted from an
+automated scraper (blocked by both retailers' bot-detection, confirmed via
+testing) to manual price entry + Vercel Cron keep-alive — code complete,
+needs the new migration applied and `CRON_SECRET` set in Vercel. See
+[`TASKS.md`](./TASKS.md) for the full phase-by-phase breakdown.

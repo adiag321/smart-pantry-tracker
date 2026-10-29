@@ -21,6 +21,7 @@ export type Database = {
           last_updated?: string;
         };
         Update: Partial<Database["public"]["Tables"]["products"]["Insert"]>;
+        Relationships: [];
       };
       price_history: {
         Row: {
@@ -38,6 +39,15 @@ export type Database = {
         Update: Partial<
           Database["public"]["Tables"]["price_history"]["Insert"]
         >;
+        Relationships: [
+          {
+            foreignKeyName: "price_history_product_id_fkey";
+            columns: ["product_id"];
+            isOneToOne: false;
+            referencedRelation: "products";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       inventory_batches: {
         Row: {
@@ -59,6 +69,15 @@ export type Database = {
         Update: Partial<
           Database["public"]["Tables"]["inventory_batches"]["Insert"]
         >;
+        Relationships: [
+          {
+            foreignKeyName: "inventory_batches_product_id_fkey";
+            columns: ["product_id"];
+            isOneToOne: false;
+            referencedRelation: "products";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       recipes: {
         Row: {
@@ -76,6 +95,7 @@ export type Database = {
           extraction_method?: "structured" | "llm" | "readability" | null;
         };
         Update: Partial<Database["public"]["Tables"]["recipes"]["Insert"]>;
+        Relationships: [];
       };
       recipe_ingredients: {
         Row: {
@@ -95,6 +115,22 @@ export type Database = {
         Update: Partial<
           Database["public"]["Tables"]["recipe_ingredients"]["Insert"]
         >;
+        Relationships: [
+          {
+            foreignKeyName: "recipe_ingredients_recipe_id_fkey";
+            columns: ["recipe_id"];
+            isOneToOne: false;
+            referencedRelation: "recipes";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+    };
+    Views: Record<string, never>;
+    Functions: {
+      deduct_inventory_fifo: {
+        Args: { p_product_id: string; p_amount: number };
+        Returns: void;
       };
     };
   };

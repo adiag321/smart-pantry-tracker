@@ -2,7 +2,7 @@
 
 ## 1. Project Overview & Objectives
 
-A personal, multi-device web application designed to manage home grocery inventory using a First-In-First-Out (FIFO) method, store and parse recipes, and automatically generate aisle-sorted shopping lists for local H-E-B and Walmart stores. The system uses a hybrid scraper/AI approach for recipe extraction (structured-data parsing first, LLM fallback second) and relies on a GitHub Actions pipeline to automatically keep grocery data fresh without manual intervention.
+A personal, multi-device web application designed to manage home grocery inventory using a First-In-First-Out (FIFO) method, store and parse recipes, and generate aisle-sorted shopping lists for local H-E-B and Walmart stores. The system uses a hybrid scraper/AI approach for recipe extraction (structured-data parsing first, LLM fallback second). Grocery price/aisle data is entered manually on a weekly cadence rather than scraped — see section 3A for why.
 
 Beyond the original scope, the app also helps answer "what can I cook with what I already have," tracks expiry dates (not just purchase dates), keeps a price history so trends are visible, supports fast barcode-based pantry logging, and is installable as a PWA for phone use.
 
@@ -13,10 +13,9 @@ Single-user by design — no multi-tenant auth system is needed.
 | Layer | Choice | Notes / Gotchas |
 |---|---|---|
 | Frontend & API Routes | Next.js (App Router, React) | — |
-| Hosting | Vercel (Hobby tier) | Permanently free for non-commercial personal projects. Hobby plan also includes Vercel Cron (max 1 trigger/day), which can serve as a backup trigger for the Supabase keep-alive ping independent of GitHub Actions. |
-| Database & Auth | Supabase (PostgreSQL, REST API) | **Gotcha:** free-tier projects auto-pause after ~7 days of inactivity. The weekly data-sync step must be treated as mandatory (not optional, as in earlier drafts) so it doubles as a keep-alive ping. |
-| Data Pipeline & Automation | GitHub Actions + Python (Playwright) | **Gotcha:** GitHub disables `schedule`-triggered workflows after 60 days with no repository activity (any commit, not just workflow runs, counts). Mitigated by having the pipeline auto-commit its CSV output back to `main` every run, which resets the inactivity clock indefinitely. |
-| Scraping engine | Playwright (not plain `requests`/BeautifulSoup) | Walmart and H-E-B both run bot-detection (Akamai/PerimeterX-class). A full headless browser with realistic headers/viewport and randomized delays is materially more resilient than a raw HTTP scraper, though neither is immune to layout changes or IP throttling — budget for occasional scraper maintenance. Store-specific results require passing a saved store/zip ID; prices and aisle numbers are location-specific, not national. |
+| Hosting | Vercel (Hobby tier) | Permanently free for non-commercial personal projects. Hobby plan includes Vercel Cron (max 1 trigger/day), used for the Supabase keep-alive ping (section 3A). |
+| Database & Auth | Supabase (PostgreSQL, REST API) | **Gotcha:** free-tier projects auto-pause after ~7 days of inactivity. The daily keep-alive cron (section 3A) exists specifically to prevent this. |
+| Grocery price/aisle data | **Manual weekly entry** via an in-app form (`/products`), not a scraper | Walmart and H-E-B both actively block automated/headless-browser access — confirmed by direct testing, not just theory (section 5). Walmart returns an Arkose/FunCaptcha "press and hold" challenge page before any content loads; H-E-B returns an Akamai bot-manager block page. Walmart's real product/pricing API exists but requires Seller/Solution-Provider partner approval with a reviewed business plan, not available to an individual. H-E-B has no public API at all. Commercial scraping-as-a-service wrappers (SerpApi, Zinc, etc.) just outsource the same scraping and cost money, breaking the free-tier constraint. Manual entry was chosen as the only option that is actually free, legal, and durable. |
 | Recipe parsing | `recipe-scrapers` (Python) as **primary**, LLM as **fallback** | Reversed from the original design. Most recipe sites embed schema.org `Recipe` JSON-LD, so a structured-data parser succeeds on the large majority of sites with no API cost and no rate limits. The LLM is only invoked when no structured data is found. |
 | AI/Parsing fallback | Current free-tier flash model (e.g. Gemini 2.x/2.5 Flash-Lite, or Groq's free Llama tier) | Gemini 1.5 Flash is deprecated; pin to whichever current-generation flash-tier model is actually available at implementation time rather than hardcoding a model name in this doc. |
 | Unit conversion | `convert-units` (npm) | Use an existing, tested conversion library instead of hand-writing `cupsToOunces()`-style helpers — smaller surface area for unit-math bugs. |
@@ -25,16 +24,14 @@ Single-user by design — no multi-tenant auth system is needed.
 
 ## 3. Core Features & Logic Flows
 
-### A. Automated Grocery Data Pipeline (The "Fresh Data" Loop)
+### A. Manual Grocery Data Entry & Supabase Keep-Alive
 
-To satisfy the requirement of updating data without manual pushes, while avoiding GitHub's 60-day cron suspension and Supabase's inactivity pause:
+**History:** the original design called for a GitHub Actions + Playwright pipeline to scrape Walmart and H-E-B weekly. That was built, deployed, and run against the live sites — both blocked it outright before any page content loaded (Walmart: Arkose/FunCaptcha "press and hold" challenge; H-E-B: Akamai bot-manager block page, `errorCode: 15`). This is deliberate anti-automation, not a selector bug or an IP-reputation issue (confirmed by re-running the same scraper from a residential IP, not just GitHub's datacenter runners). Walmart's actual product/pricing API requires Seller/Solution-Provider approval unavailable to an individual; H-E-B has no public API. The scraper was removed rather than built out further to defeat bot-detection, since that would mean deliberately circumventing an access control the retailer intentionally put up.
 
-1. **Weekly Trigger:** A GitHub Action runs a Python script every Sunday at 2:00 AM (`cron` schedule in the workflow file).
-2. **Targeted Scrape:** The script uses Playwright to iterate through a predefined list of regular items, querying the user's local Walmart and H-E-B (by saved store ID) for current prices, availability, and aisle numbers. Requests include randomized delays and realistic headers to reduce the chance of bot-detection blocks.
-3. **Data Export & Commit:** The script writes output to `walmart_data.csv` and `heb_data.csv` in the runner, and appends a dated row to a `price_history.csv` for each product (see schema in section 4).
-4. **Auto-Commit Logic:** A GitHub Action step (e.g. `stefanzweifel/git-auto-commit-action`) commits the new CSVs back to `main`. This simulates repository activity, indefinitely bypassing the 60-day cron suspension.
-5. **Database Sync (mandatory, not optional):** The same workflow run calls a Supabase Edge Function (or a Next.js API route secured with a shared secret) to upsert the new CSV data into `products`, append to `price_history`, and perform a trivial read so Supabase registers activity and does not pause. This step must run every time the pipeline runs — it is both the sync and the keep-alive.
-6. **Backup trigger (optional hardening):** A Vercel Cron job (max daily, Hobby-tier limit) can independently ping the same keep-alive endpoint as a second line of defense if a GitHub Actions run is ever skipped.
+**Current design:**
+
+1. **Manual entry:** `/products` in the app is a simple form — product name, store (Walmart/HEB), aisle, price. Submitting it upserts into `products` (keyed on `(name, store)`) and appends a row to `price_history`. Takes a couple of minutes once a week for whatever was actually bought.
+2. **Supabase keep-alive (still needed, now independent of any scrape):** without the GitHub Actions pipeline, nothing else was touching the database regularly, and Supabase free-tier projects auto-pause after ~7 days idle. `vercel.json` defines a Vercel Cron job hitting `/api/cron/keep-alive` daily, which does a trivial read. The route is exempted from the shared-password proxy gate (Vercel Cron requests carry no login cookie) and instead checks a `CRON_SECRET` bearer token that Vercel sends automatically for cron invocations, so the endpoint isn't left open to the public internet.
 
 ### B. Intelligent Recipe Extraction (Scraper-first, LLM Fallback)
 
@@ -80,7 +77,7 @@ To make logging a purchase faster than manual form entry:
 
 ### G. Price History
 
-Rather than overwriting `last_updated` on every scrape, each weekly run appends a new row to a `price_history` table, so trends are preserved for free as a byproduct of the existing pipeline.
+Rather than overwriting `last_updated` on every manual price update, each save appends a new row to `price_history`, so trends are preserved for free as a byproduct of the entry form in section 3A.
 
 - The pantry/product dashboard can show a simple sparkline of a product's price over the last N weeks.
 - Optionally, the shopping list view can flag "price dropped since last check" per item.
@@ -99,7 +96,7 @@ Explicitly defining the step the original draft left implicit:
 1. For a recipe (or the full meal plan for the week), convert each ingredient's `required_quantity` to the pantry's storage unit via the Unit Conversion Engine.
 2. Sum `quantity_remaining` across all of that product's current `inventory_batches`.
 3. Shortfall = required − available. If shortfall ≤ 0, the item is already covered and is omitted from the list.
-4. Remaining shortfall items are grouped by `store`, then sorted by `aisle` within each store, using the latest `products` data from the weekly scrape.
+4. Remaining shortfall items are grouped by `store`, then sorted by `aisle` within each store, using the latest `products` data from manual entry.
 5. If an item is sold at both Walmart and H-E-B, default to the cheaper of the two (using `price_history`'s latest entry) unless the user has pinned a preferred store for that item.
 
 ### J. Progressive Web App (Multi-Device Support)
@@ -111,10 +108,10 @@ Since the app is explicitly multi-device:
 
 ## 4. Database Schema (Supabase PostgreSQL)
 
-### Table: `products` (updated via GitHub Actions)
+### Table: `products` (updated via manual entry, section 3A)
 - `id` (UUID, PK)
 - `name` (String, e.g. "H-E-B Whole Milk")
-- `store` (String, "Walmart" or "HEB")
+- `store` (String, "Walmart" or "HEB") — unique together with `name`, so manual-entry upserts have a conflict target
 - `aisle` (String, e.g. "Dairy - A12")
 - `price` (Decimal) — latest known price, kept for fast lookups
 - `barcode` (String, nullable) — UPC, populated opportunistically from section 3F
@@ -150,11 +147,11 @@ Since the app is explicitly multi-device:
 
 ## 5. Known Risks & Gotchas (summary)
 
-- **Supabase free-tier pause:** auto-pauses after ~7 days idle. Mitigated by making the weekly sync/keep-alive step mandatory (section 3A, step 5).
-- **GitHub Actions 60-day cron suspension:** mitigated by the auto-commit step resetting repo activity every run (section 3A, step 4).
-- **Walmart/H-E-B anti-bot defenses:** Playwright + randomized delays reduce but do not eliminate the risk of blocks or layout breakage; treat the scraper as something that will need occasional maintenance, not a "set and forget" script.
+- **Supabase free-tier pause:** auto-pauses after ~7 days idle. Mitigated by the daily Vercel Cron keep-alive ping (section 3A).
+- **Walmart/H-E-B actively block automated access — confirmed, not theoretical.** A full Playwright pipeline was built and run against both live sites: Walmart returned a press-and-hold Arkose/FunCaptcha challenge, H-E-B returned an Akamai bot-manager block page (`errorCode: 15`) — both before any real page content loaded, reproduced from a residential IP (not just GitHub's datacenter runners) to rule out IP-reputation as the cause. This was treated as a hard stop, not a "add stealth plugins and retry" problem: deliberately defeating a retailer's explicit anti-automation wall is a different thing from an incidentally-fragile selector, and isn't something to build further on. Resolution: manual weekly price/aisle entry via `/products` (section 3A) replaced the scraper entirely.
+- **No free public API alternative exists either.** Walmart's real pricing/catalog API requires Seller/Solution-Provider partner approval with a reviewed business plan — not obtainable as an individual. H-E-B has no public API. Third-party "Walmart API" services (SerpApi, Zinc, etc.) are paid wrappers around the same scraping, which both costs money and doesn't avoid the underlying access-control question.
 - **LLM model churn:** free-tier model names/availability change over time (e.g. Gemini 1.5 Flash's deprecation) — pin to whatever current-generation free-tier flash model is available at build time rather than a specific model string in this document.
-- **Store/location specificity:** prices and aisle numbers are per-store, not national — the scraper must target a specific saved store ID for both retailers, not just a brand-level query.
+- **Store/location specificity:** prices and aisle numbers are per-store, not national — manual entries should reflect your actual local store, not a brand-level average.
 
 ## 6. Implementation Phases (Prompting Guide for Claude)
 
@@ -163,8 +160,8 @@ Build the project in these phases:
 **Phase 1: Supabase & Next.js Scaffold.**
 Set up a Next.js (App Router) project integrated with Supabase. Generate SQL migrations for `products`, `price_history`, `inventory_batches`, `recipes`, and `recipe_ingredients`, including the FIFO deduction stored procedure. Add a single shared-password auth gate.
 
-**Phase 2: The GitHub Action Pipeline.**
-Write the Python scraping script (using Playwright) and `.github/workflows/scraper.yml` to handle the automated weekly scrape, CSV generation (including `price_history.csv`), auto-commit back to the repository, and the mandatory Supabase sync/keep-alive call.
+**Phase 2: Manual Data Entry & Keep-Alive.**
+Build the `/products` manual price/aisle entry form and its API route (upsert `products`, append `price_history`). Add the `/api/cron/keep-alive` route, secure it with `CRON_SECRET`, exempt it from the shared-password proxy gate, and configure it in `vercel.json` as a daily Vercel Cron job. (Originally scoped as a GitHub Actions + Playwright scraper pipeline; replaced after confirming Walmart/H-E-B both block automated access — see section 5.)
 
 **Phase 3: The Recipe Ingestion Engine.**
 Build the Next.js API route that accepts a URL. Implement the structured-data-first flow using `recipe-scrapers` (or an equivalent Node JSON-LD parser), with LLM fallback (e.g. via the current Gemini/Groq SDK) and a final Readability-based fallback. Record `extraction_method` on save.

@@ -5,7 +5,11 @@ const AUTH_COOKIE = "pantry_auth";
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (pathname.startsWith("/login") || pathname.startsWith("/api/login")) {
+  if (
+    pathname.startsWith("/login") ||
+    pathname.startsWith("/api/login") ||
+    pathname.startsWith("/api/cron")
+  ) {
     return NextResponse.next();
   }
 
