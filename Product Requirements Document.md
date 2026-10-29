@@ -49,7 +49,7 @@ A utility module (built on `convert-units`) within the Next.js backend that maps
 
 - Converts volumetric recipe units (tablespoons, cups) to standard purchasing units (ounces, liters, grams).
 - Example: Recipe requires 2 cups of milk → engine converts 2 cups → 16 fl oz → compares against a 1-gallon (128 fl oz) inventory item.
-- Falls back to a small custom lookup table only for grocery-specific units `convert-units` doesn't know natively (e.g. "1 head of lettuce," "1 can").
+- Falls back to a small custom lookup table for units `convert-units` doesn't know natively: bare counts ("2 eggs," no unit) via a hand-rolled each/dozen measure (handled outside the library - the installed version supports this at runtime but the TypeScript type definitions don't declare it); a butter "stick" anchored separately to both volume (1 stick = 8 Tbs) and mass (1 stick ≈ 113g), since those are independent fixed culinary conventions, not one derived from the other via density; and non-convertible units (clove, slice, can, package, head, pinch) that are deliberately only combinable with themselves rather than guessed at.
 
 ### D. Pantry Inventory (FIFO)
 
@@ -59,6 +59,8 @@ Inventory is tracked by batches (purchase dates) rather than a single flat quant
 - When a recipe is cooked, the system deducts the required quantities from the batch with the oldest `purchase_date` first.
 - If the oldest batch hits 0, it rolls over to deduct from the next oldest batch.
 - **Implementation note:** deduction across one or more batches must run as a single PostgreSQL transaction/stored procedure (`plpgsql` function), not as sequential app-layer read-then-write calls, to avoid race conditions if the app is used from two devices at the same time.
+- **App-layer wiring (`POST /api/recipes/[id]/cook`):** for each recipe ingredient, the app resolves which `products` row(s) the ingredient name refers to (see "ingredient-to-product matching" below), converts the required quantity into that product's inventory unit via the Unit Conversion Engine, then calls `deduct_inventory_fifo()` - one RPC call per ingredient, not a single transaction spanning the whole recipe. One ingredient failing (no matching product, insufficient stock, unconvertible units) doesn't block the others; the route reports a per-ingredient status so the result is always "here's exactly what happened," never an opaque all-or-nothing error. Verified against live data: a two-batch product correctly drained the older batch first, left the newer batch untouched when the older one exactly covered the requirement, and a failed/insufficient deduction attempt left inventory completely unchanged (confirming the stored procedure's atomicity under a real failure, not just the happy path).
+- **Ingredient-to-product matching:** recipe ingredients use free-text names ("butter, softened") while `products` rows are specific store listings ("Unsalted Butter"); there's no explicit FK between them. Matching strips trailing prep instructions after a comma/parenthesis ("butter, softened" → "butter") and requires **whole-word** containment via Postgres regex word boundaries (`\y...\y`), not plain substring `ILIKE`. Plain substring matching was tried first and rejected after live testing caught a real bug: `ILIKE '%salt%'` matched "Unsalted Butter" (the letters "salt" inside "un**salt**ed") and silently deducted the wrong product's inventory when cooking a recipe that needed salt.
 
 ### E. Expiry Tracking ("Use Soon")
 
@@ -91,13 +93,12 @@ Given the schema already distinguishes recipes/ingredients from pantry batches, 
 
 ### I. Shopping List Generation
 
-Explicitly defining the step the original draft left implicit:
+Implemented as `GET /api/recipes/[id]/shopping-list`, per recipe (the original draft left this step implicit; a meal-plan-wide aggregate across multiple recipes is not implemented - out of scope for the current phase):
 
-1. For a recipe (or the full meal plan for the week), convert each ingredient's `required_quantity` to the pantry's storage unit via the Unit Conversion Engine.
-2. Sum `quantity_remaining` across all of that product's current `inventory_batches`.
-3. Shortfall = required − available. If shortfall ≤ 0, the item is already covered and is omitted from the list.
-4. Remaining shortfall items are grouped by `store`, then sorted by `aisle` within each store, using the latest `products` data from manual entry.
-5. If an item is sold at both Walmart and H-E-B, default to the cheaper of the two (using `price_history`'s latest entry) unless the user has pinned a preferred store for that item.
+1. For each ingredient, find matching `products` (same whole-word matching as section 3D) and sum their `inventory_batches.quantity_remaining`, converting each batch's unit into the ingredient's required unit via the Unit Conversion Engine. A batch whose unit can't be converted is skipped (counted as 0 available) rather than guessed at - the math would rather under-count availability and show an extra line than silently over-count it.
+2. Shortfall = required − available. If shortfall ≤ 0, the item is already covered and is omitted from the list. Verified against live data: a product with 6 total inventory units (3 cups-equivalent) correctly dropped off the list for a recipe needing 1 cup, while every genuinely unmatched ingredient still appeared.
+3. For each shortfall item, the cheapest of its matching `products` (by current `price`) is chosen for store/aisle display - a product with no price recorded yet sorts last rather than being treated as free.
+4. Remaining shortfall items are grouped by `store` (an "Unknown store" bucket catches ingredients with no matching product at all - still listed, just without aisle/price), then sorted by `aisle` within each store.
 
 ### J. Progressive Web App (Multi-Device Support)
 
@@ -167,7 +168,7 @@ Build the `/products` manual price/aisle entry form and its API route (upsert `p
 Build `/api/recipes` (`GET` lists saved recipes, `POST` accepts a URL) and the minimal `/recipes` input/list UI. Implement the structured-data-first flow using a Node JSON-LD parser (`cheerio`), with a multi-provider LLM fallback (Groq/Gemini/Mistral, in order, skipping unconfigured providers) and a final Readability-based (`@mozilla/readability` + `jsdom`) fallback. Record `extraction_method` on save.
 
 **Phase 4: The Unit Conversion, FIFO & Shopping List Logic.**
-Write the TypeScript utility built on `convert-units`, the database transaction/stored-procedure logic that deducts required ingredients from the oldest `inventory_batches` first, and the shopping-list shortfall/grouping/store-preference logic from section 3I.
+Write the TypeScript utility built on `convert-units`, the ingredient-to-product matching used by both the cook and shopping-list flows, `POST /api/recipes/[id]/cook` (wires to the `deduct_inventory_fifo()` stored procedure from Phase 1), and `GET /api/recipes/[id]/shopping-list` (shortfall/grouping/store-preference logic from section 3I). All verified end-to-end against live Supabase data, not just unit-tested in isolation.
 
 **Phase 5: Pantry Intelligence Features.**
 Implement expiry tracking (section 3E), the "what can I cook now" reverse-match view (section 3H), and price-history sparklines (section 3G).

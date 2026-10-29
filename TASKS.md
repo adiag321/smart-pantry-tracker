@@ -62,10 +62,18 @@ techniques — see PRD section 5 for the full writeup.
 
 ## Phase 4: Unit Conversion, FIFO & Shopping List Logic
 
-- [ ] Build unit-conversion utility on top of `convert-units`, plus small lookup table for grocery-specific units it doesn't cover natively
-- [ ] Wire app-layer calls to `deduct_inventory_fifo()` when a recipe is cooked
-- [ ] Implement shopping-list shortfall calculation (required − available per product)
-- [ ] Implement store/aisle grouping and cheaper-store tie-breaking using `price_history`
+- [x] Build unit-conversion utility on top of `convert-units` (`src/lib/units/convert.ts`) — handles standard volume/mass units plus a custom lookup for grocery-specific ones `convert-units` doesn't know: bare counts ("2 eggs") via a hand-rolled `ea`/`dz` measure (the installed version supports this at runtime but `@types/convert-units` doesn't declare it, so handled outside the library), a butter "stick" anchored to both volume (8 Tbs) and mass (113g) since those are independent fixed culinary conventions, and non-convertible units (clove, slice, can, package, head, pinch) that only combine with themselves
+- [x] Build ingredient-to-product matching (`src/lib/inventory/matchProducts.ts`) and batch-availability summing (`src/lib/inventory/availability.ts`) — both needed before FIFO deduction or shopping-list math can resolve which `products`/`inventory_batches` rows an ingredient refers to
+- [x] Wire app-layer calls to `deduct_inventory_fifo()` when a recipe is cooked — `POST /api/recipes/[id]/cook`, one RPC call per ingredient, each reporting its own status (`deducted`/`no_product_match`/`no_inventory`/`unit_mismatch`/`insufficient`) rather than one failure blocking the rest
+- [x] Implement shopping-list shortfall calculation (required − available per product) — `GET /api/recipes/[id]/shopping-list`
+- [x] Implement store/aisle grouping and cheaper-store tie-breaking using `price_history` — grouped by store, sorted by aisle within each group, cheapest matching product chosen when an ingredient matches products at multiple stores
+- [x] Minimal UI (`/recipes/[id]`) with "Cook this recipe" and "Shopping list" buttons to exercise both flows
+- [x] **Verified end-to-end against live Supabase data**, not just unit tests: seeded a real product with two inventory batches (2 sticks @ Oct 1, 4 sticks @ Oct 20) and extracted a real recipe needing "1 cup butter, softened":
+  - Shopping list correctly omitted butter (3 cups available > 1 cup needed) while listing every other unmatched ingredient
+  - Cooking deducted exactly 2 sticks (= 1 cup) from the **older** batch first, leaving the newer batch untouched — FIFO order confirmed
+  - Draining inventory further correctly produced `no_inventory`, then `insufficient` (with the RPC's own error message surfaced) once a non-zero-but-insufficient batch existed
+  - The failed/insufficient deduction attempt left inventory completely unchanged — confirmed the stored procedure's atomicity holds under a real failure, not just the happy path
+- [x] **Found and fixed a real matching bug during this testing, not after:** ingredient-to-product matching originally used plain substring `ilike`, which matched the ingredient "salt" against the product "Unsalted Butter" (the letters "salt" inside "un**salt**ed") and silently deducted the wrong product's inventory when cooking. Switched to Postgres word-boundary regex matching (`\y...\y` via the `imatch`/`~*` operator) to require whole-word containment instead of any substring.
 
 ## Phase 5: Pantry Intelligence Features
 

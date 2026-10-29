@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 type Recipe = {
   id: string;
@@ -88,7 +89,9 @@ export default function RecipesPage() {
         {recipes.map((r) => (
           <li key={r.id} className="rounded-lg border p-4">
             <div className="flex items-baseline justify-between gap-2">
-              <h3 className="font-medium">{r.title}</h3>
+              <Link href={`/recipes/${r.id}`} className="font-medium underline">
+                {r.title}
+              </Link>
               <span className="text-xs text-neutral-500">{r.extraction_method}</span>
             </div>
             {r.recipe_ingredients.length > 0 && (

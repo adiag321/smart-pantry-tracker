@@ -23,6 +23,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
+    "@types/convert-units": "^2.3.12",
     "@types/jsdom": "^30.0.0",
     "@types/node": "^20",
     "@types/react": "^19",

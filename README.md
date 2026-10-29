@@ -51,8 +51,9 @@ See [`.env.example`](./.env.example). You'll need:
   project env vars once deployed — it's how `/api/cron/keep-alive`
   authenticates Vercel Cron's requests).
 - Optionally, any combination of `GROQ_API_KEY` / `GEMINI_API_KEY` /
-  `MISTRAL_API_KEY` for the recipe-extraction LLM fallback (section below) —
-  all free-tier, all optional, each tried only if its key is set.
+  `OPENROUTER_API_KEY` / `NVIDIA_API_KEY` for the recipe-extraction LLM
+  fallback (section below) — all free-tier, all optional, each tried only
+  if its key is set.
 
 **Gotcha:** Supabase free-tier projects auto-pause after ~7 days with no
 activity. The daily Vercel Cron job hitting `/api/cron/keep-alive` exists
@@ -113,24 +114,62 @@ token.
 3. Saves the result to `recipes`/`recipe_ingredients`, recording which
    engine succeeded in `extraction_method`.
 
-All three extraction paths are implemented and the structured + Readability
-paths are verified (see [`TASKS.md`](./TASKS.md)); the LLM fallback hasn't
-been exercised against a live provider yet since no API key is configured.
+All three extraction paths, and all four LLM providers, are verified working
+against real requests (see [`TASKS.md`](./TASKS.md)).
+
+## Unit conversion, FIFO deduction & shopping list (Phase 4)
+
+`src/lib/units/convert.ts` converts between recipe units and pantry storage
+units (e.g. "2 cups" → the ounces a batch is tracked in), on top of
+`convert-units` plus a small custom table for units it doesn't know (bare
+counts, a butter "stick", and non-convertible grocery units like "clove"
+that only combine with themselves).
+
+`src/lib/inventory/matchProducts.ts` resolves a recipe ingredient's
+free-text name ("butter, softened") to matching `products` rows ("Unsalted
+Butter") via case-insensitive **whole-word** regex matching — not plain
+substring, which live testing caught matching "salt" against "Unsalted
+Butter" and silently deducting the wrong product.
+
+- **`POST /api/recipes/[id]/cook`** — for each ingredient, converts the
+  required quantity into the matched product's inventory unit and calls the
+  Phase 1 `deduct_inventory_fifo()` stored procedure. Each ingredient
+  reports its own status independently (`deducted` / `no_product_match` /
+  `no_inventory` / `unit_mismatch` / `insufficient`) rather than one failure
+  blocking the rest.
+- **`GET /api/recipes/[id]/shopping-list`** — sums available inventory per
+  ingredient (converted to its required unit), computes the shortfall,
+  picks the cheapest matching product per shortfall item, and groups the
+  result by store/aisle.
+- **`/recipes/[id]`** — minimal UI with "Cook this recipe" and "Shopping
+  list" buttons.
+
+Verified end-to-end against live Supabase data (not just unit-tested): a
+two-batch product correctly drained the older batch first, a shopping list
+correctly omitted an ingredient that was already fully stocked, and a
+failed/insufficient deduction left inventory completely unchanged,
+confirming the stored procedure's atomicity under a real failure.
 
 ## Project structure
 
 ```
 src/
   app/
-    products/           Manual price/aisle entry UI
-    recipes/            Recipe URL input + saved-recipes list UI
-    api/products/        Upsert products + append price_history
-    api/recipes/         DB-check-first, structured/LLM/Readability chain
-    api/cron/keep-alive/ Daily Supabase keep-alive (Vercel Cron)
+    products/                    Manual price/aisle entry UI
+    recipes/                     Recipe URL input + saved-recipes list UI
+    recipes/[id]/                Cook / shopping-list UI for one recipe
+    api/products/                 Upsert products + append price_history
+    api/recipes/                  DB-check-first, structured/LLM/Readability chain
+    api/recipes/[id]/cook/        Per-ingredient FIFO deduction
+    api/recipes/[id]/shopping-list/  Shortfall calculation, grouped by store
+    api/cron/keep-alive/          Daily Supabase keep-alive (Vercel Cron)
   lib/
     supabase/       Server-only Supabase client (admin.ts, service-role key)
     recipes/        Extraction engines: extractStructured, extractLLM,
                     extractReadability, parseIngredientLine, types
+    units/          convert.ts - recipe unit <-> pantry storage unit conversion
+    inventory/      matchProducts.ts, availability.ts - ingredient-to-product
+                    resolution shared by the cook and shopping-list routes
   types/          Hand-maintained Database type for Supabase queries
   proxy.ts        Shared-password auth gate (Next.js 16 "proxy" convention,
                   formerly "middleware"); exempts /api/login and /api/cron
@@ -149,10 +188,9 @@ pnpm lint    # eslint
 
 ## Status
 
-Phase 1 (Supabase & Next.js scaffold) complete. Phase 2 (manual price entry
-+ keep-alive) complete and verified. Phase 3 (recipe ingestion) complete and
-fully verified — structured, LLM (Groq/Gemini/OpenRouter), and Readability
-paths all confirmed working against real requests, all four LLM providers
-included (Groq, Gemini, OpenRouter, NVIDIA NIM). Nothing
-is deployed to Vercel yet — everything so far only runs locally. See
-[`TASKS.md`](./TASKS.md) for the full phase-by-phase breakdown.
+Phases 1–4 complete and verified end-to-end against live Supabase data:
+scaffold + auth, manual price entry + keep-alive, recipe ingestion (all
+three extraction paths, all four LLM providers), and unit conversion/FIFO
+deduction/shopping list. Nothing is deployed to Vercel yet — everything so
+far only runs locally. See [`TASKS.md`](./TASKS.md) for the full
+phase-by-phase breakdown.
