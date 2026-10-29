@@ -12,6 +12,7 @@
     "@google/genai": "^2.31.0",
     "@mozilla/readability": "^0.6.0",
     "@supabase/supabase-js": "^2.118.0",
+    "@zxing/browser": "^0.2.1",
     "cheerio": "^1.2.0",
     "convert-units": "^2.3.4",
     "groq-sdk": "^1.6.0",

@@ -12,7 +12,9 @@ Next.js (App Router, TypeScript) · Supabase (Postgres) · Tailwind CSS ·
 Vercel Cron (daily Supabase keep-alive) · `convert-units` for unit
 conversion · `cheerio`/`@mozilla/readability`/`jsdom` + Groq/Gemini/OpenRouter/NVIDIA NIM
 for recipe extraction (last two via the `openai` SDK with a custom `baseURL`,
-both being OpenAI-compatible).
+both being OpenAI-compatible) · `@zxing/browser` as a `BarcodeDetector`
+fallback · Open Food Facts for UPC lookups · a hand-rolled service worker
++ manifest for PWA installability.
 
 Single-user app: there's no Supabase Auth / multi-tenant login, just one
 shared password gated by `src/proxy.ts`.
@@ -150,6 +152,55 @@ correctly omitted an ingredient that was already fully stocked, and a
 failed/insufficient deduction left inventory completely unchanged,
 confirming the stored procedure's atomicity under a real failure.
 
+## Pantry intelligence (Phase 5)
+
+`/pantry` surfaces three things, all reusing the matching/conversion logic
+already built for cook/shopping-list:
+
+- **Use soon** — `GET /api/pantry?days=3` sorts `inventory_batches` by
+  `expiry_date` ascending (nulls last) and flags anything within the
+  threshold. `purchase_date` still drives FIFO deduction order; `expiry_date`
+  is tracked separately since the two can disagree.
+- **Ready to cook / almost there** — `src/lib/recipes/readyToCook.ts` sums
+  available quantity per ingredient across every stored recipe; a recipe
+  with every ingredient covered is "ready," one missing 1-2 ingredients is
+  "almost there." `GET /api/recipes/ready-to-cook`.
+- **Price sparklines** — `GET /api/products/[id]/price-history?weeks=8`
+  plus a minimal inline-SVG `Sparkline` component; a free byproduct of
+  `price_history` never being overwritten on update.
+
+Verified against live data: a 6-ingredient recipe correctly landed in
+"almost there" with exactly the one genuinely-unmatched ingredient listed
+once 5 of 6 were stocked, then moved to "ready to cook" once the 6th was
+added.
+
+## Barcode logging & PWA (Phase 6)
+
+`/pantry/scan` is the fast path into inventory (`POST /api/inventory`,
+the only write path into `inventory_batches` besides the FIFO stored
+procedure itself):
+
+- Tries the native `BarcodeDetector` API first, falls back to
+  `@zxing/browser` decoding the same camera video element for
+  Safari/iOS/Firefox, which don't implement `BarcodeDetector`.
+- `GET /api/barcode/[upc]` checks our own `products.barcode` first (reuses
+  known store/price/aisle), then falls back to Open Food Facts (free, no
+  API key) for a bare product name; 404s to manual entry with the UPC
+  pre-filled if neither has it.
+- `public/manifest.json` + a hand-rolled `public/sw.js` make the app
+  installable and give it a cached app shell for offline launch -
+  `/api/*` is always network-only since the app is nothing but live
+  Supabase data. `src/proxy.ts` exempts `/manifest.json`, `/sw.js`, and
+  `/icon*` from the password gate so the browser can fetch them
+  unauthenticated.
+
+Verified against live services: looked up a real UPC against Open Food
+Facts, logged a batch from it, then confirmed a second lookup of the same
+UPC resolved from our own `products` table instead of hitting Open Food
+Facts again - and that a later manual price edit didn't null out the
+scanned barcode. The camera permission/scan flow itself still needs manual
+verification in a real browser - that can't be exercised headlessly.
+
 ## Project structure
 
 ```
@@ -158,23 +209,38 @@ src/
     products/                    Manual price/aisle entry UI
     recipes/                     Recipe URL input + saved-recipes list UI
     recipes/[id]/                Cook / shopping-list UI for one recipe
+    pantry/                      Use-soon, sparklines, ready-to-cook UI
+    pantry/scan/                 Barcode-scan + manual pantry logging UI
     api/products/                 Upsert products + append price_history
+    api/products/[id]/price-history/  Price-history series for sparklines
     api/recipes/                  DB-check-first, structured/LLM/Readability chain
     api/recipes/[id]/cook/        Per-ingredient FIFO deduction
     api/recipes/[id]/shopping-list/  Shortfall calculation, grouped by store
+    api/recipes/ready-to-cook/     Reverse-match: ready / almost-there recipes
+    api/pantry/                   Use-soon batch listing
+    api/barcode/[upc]/            UPC lookup: own products first, else Open Food Facts
+    api/inventory/                Create an inventory batch (barcode scan or manual)
     api/cron/keep-alive/          Daily Supabase keep-alive (Vercel Cron)
+  components/
+    Sparkline.tsx   Minimal inline-SVG price sparkline
   lib/
     supabase/       Server-only Supabase client (admin.ts, service-role key)
     recipes/        Extraction engines: extractStructured, extractLLM,
-                    extractReadability, parseIngredientLine, types
+                    extractReadability, parseIngredientLine, types, readyToCook
     units/          convert.ts - recipe unit <-> pantry storage unit conversion
     inventory/      matchProducts.ts, availability.ts - ingredient-to-product
-                    resolution shared by the cook and shopping-list routes
+                    resolution shared by the cook, shopping-list, and
+                    ready-to-cook routes
+    barcode/        lookupUpc.ts - Open Food Facts UPC lookup
   types/          Hand-maintained Database type for Supabase queries
   proxy.ts        Shared-password auth gate (Next.js 16 "proxy" convention,
-                  formerly "middleware"); exempts /api/login and /api/cron
+                  formerly "middleware"); exempts /api/login, /api/cron,
+                  /manifest.json, /sw.js, /icon*
 supabase/
   migrations/     SQL migrations, applied in order
+public/
+  manifest.json   PWA manifest (installable app)
+  sw.js           Service worker - cached app shell, network-only /api/*
 vercel.json       Daily cron schedule for /api/cron/keep-alive
 ```
 
@@ -188,9 +254,14 @@ pnpm lint    # eslint
 
 ## Status
 
-Phases 1–4 complete and verified end-to-end against live Supabase data:
-scaffold + auth, manual price entry + keep-alive, recipe ingestion (all
-three extraction paths, all four LLM providers), and unit conversion/FIFO
-deduction/shopping list. Nothing is deployed to Vercel yet — everything so
-far only runs locally. See [`TASKS.md`](./TASKS.md) for the full
-phase-by-phase breakdown.
+Phases 1–6 complete and verified end-to-end against live Supabase data (and,
+for Phase 6, live external services): scaffold + auth, manual price entry +
+keep-alive, recipe ingestion (all three extraction paths, all four LLM
+providers), unit conversion/FIFO deduction/shopping list, pantry
+intelligence (use-soon, ready-to-cook, price sparklines), and barcode
+logging + PWA installability. The one thing not verifiable from the CLI is
+the actual camera permission/scan flow - that needs a real browser on a
+real device. Nothing is deployed to Vercel yet — everything so far only
+runs locally. Remaining: Phase 7 (polished frontend UI - the current pages
+are minimal, built to exercise each API). See [`TASKS.md`](./TASKS.md) for
+the full phase-by-phase breakdown.

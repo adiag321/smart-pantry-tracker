@@ -77,15 +77,20 @@ techniques — see PRD section 5 for the full writeup.
 
 ## Phase 5: Pantry Intelligence Features
 
-- [ ] Expiry tracking "use soon" view (sort by `expiry_date`, configurable threshold)
-- [ ] "What can I cook now" / "almost there" reverse-match view
-- [ ] Price-history sparklines per product
+- [x] Expiry tracking "use soon" view — `GET /api/pantry` (`?days=`, default 3), joins `inventory_batches` to `products`, sorts by `expiry_date` ascending with nulls last, flags `useSoon` per batch
+- [x] "What can I cook now" / "almost there" reverse-match view — `src/lib/recipes/readyToCook.ts` + `GET /api/recipes/ready-to-cook`, reusing the same `matchProducts`/`getAvailableQuantity`/unit-conversion logic the cook/shopping-list routes use; "ready" = 0 missing ingredients, "almost" = 1–2 missing
+- [x] Price-history sparklines per product — `GET /api/products/[id]/price-history` (`?weeks=`, default 8) plus a minimal inline-SVG `src/components/Sparkline.tsx` (no charting library needed for a single polyline)
+- [x] `/pantry` UI — use-soon list with sparklines, ready-to-cook/almost-there recipe lists
+- [x] **Verified end-to-end against live Supabase data**: extracted a real food.com recipe (6 ingredients), stocked inventory for 5 of them via `POST /api/inventory` — confirmed the recipe correctly landed in "almost there" with exactly the one genuinely-unmatched ingredient listed; stocked the 6th and confirmed it moved to "ready to cook" with an empty missing list. Also confirmed a batch with an expiry 3 days out was flagged `useSoon: true`, and that two sequential price entries on the same product produced a two-point price-history series.
 
 ## Phase 6: Barcode Logging & PWA
 
-- [ ] Camera-based barcode scanner (`BarcodeDetector` API + fallback lib)
-- [ ] Barcode lookup against a free UPC database (e.g. Open Food Facts), graceful fallback to manual entry
-- [ ] `manifest.json` + service worker for installable, partially-offline use
+- [x] Camera-based barcode scanner — `/pantry/scan`, tries the native `BarcodeDetector` API first (Chrome/Edge/Android), falls back to `@zxing/browser` decoding the same `getUserMedia` video element for Safari/iOS and Firefox, which don't implement `BarcodeDetector`
+- [x] Barcode lookup against a free UPC database — `src/lib/barcode/lookupUpc.ts` (Open Food Facts, no API key), `GET /api/barcode/[upc]` checks our own `products.barcode` first (reuses known store/price/aisle) before falling back to Open Food Facts for a bare product name; 404s with `source: "none"` when neither has it, and the scan UI degrades to manual entry with the UPC pre-filled per PRD section 3F
+- [x] `POST /api/inventory` — the write path barcode-scanning (and manual pantry logging) actually needed; resolves an existing product by `productId` or upserts by `name`+`store` (mirroring `/api/products`'s upsert), explicitly omitting `barcode` from the upsert payload unless provided so a manual re-entry can't silently null out a previously-scanned barcode
+- [x] `manifest.json` + a hand-rolled service worker (`public/sw.js`) for installable, partially-offline use — caches the app shell (static pages) on install, always network-first for `/api/*` since the app is nothing but live Supabase data; `src/proxy.ts` exempted `/manifest.json`, `/sw.js`, and `/icon*` from the password gate so the browser can fetch them unauthenticated
+- [x] **Verified end-to-end against live external services and Supabase, not just code review**: looked up a real UPC (Diet Coke, `0049000028911`) against the live Open Food Facts API and got back a real product name; looked up a known-invalid UPC and confirmed a clean 404 with `source: "none"`; logged a batch from that scan via `POST /api/inventory`, then re-looked-up the same UPC and confirmed it now resolves via `source: "products"` (our own table) instead of hitting Open Food Facts again; confirmed a manual price update afterward left the scanned barcode intact rather than nulling it out
+- [ ] Actual camera permission/scan flow (`BarcodeDetector` vs. `@zxing/browser` fallback) needs manual verification in a real browser on a real device — this can't be exercised headlessly from the CLI
 
 ## Phase 7: The Frontend UI
 

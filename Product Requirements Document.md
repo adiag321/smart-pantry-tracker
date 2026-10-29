@@ -171,10 +171,10 @@ Build `/api/recipes` (`GET` lists saved recipes, `POST` accepts a URL) and the m
 Write the TypeScript utility built on `convert-units`, the ingredient-to-product matching used by both the cook and shopping-list flows, `POST /api/recipes/[id]/cook` (wires to the `deduct_inventory_fifo()` stored procedure from Phase 1), and `GET /api/recipes/[id]/shopping-list` (shortfall/grouping/store-preference logic from section 3I). All verified end-to-end against live Supabase data, not just unit-tested in isolation.
 
 **Phase 5: Pantry Intelligence Features.**
-Implement expiry tracking (section 3E), the "what can I cook now" reverse-match view (section 3H), and price-history sparklines (section 3G).
+Implemented: `GET /api/pantry` (expiry tracking, section 3E), `src/lib/recipes/readyToCook.ts` + `GET /api/recipes/ready-to-cook` (reverse-match, section 3H, reusing the Phase 4 matching/conversion logic), and `GET /api/products/[id]/price-history` + a minimal inline-SVG sparkline component (section 3G). `/pantry` exercises all three. Verified against live data: a 6-ingredient recipe moved from "almost there" (1 missing) to "ready to cook" (0 missing) as inventory was added ingredient-by-ingredient.
 
 **Phase 6: Barcode Logging & PWA.**
-Add the camera-based barcode scanning flow with UPC lookup fallback (section 3F), and the `manifest.json`/service worker setup for installable, partially-offline multi-device use (section 3J).
+Implemented: `/pantry/scan` (`BarcodeDetector` API, falling back to `@zxing/browser` for browsers without it - section 3F), `GET /api/barcode/[upc]` (own `products.barcode` first, then Open Food Facts), `POST /api/inventory` (the actual write path into `inventory_batches` this flow needed - previously there was none outside the FIFO stored procedure), and `public/manifest.json` + a hand-rolled `public/sw.js` (section 3J, cached app shell, `/api/*` always network-only). Verified against the live Open Food Facts API and live Supabase (found vs. not-found UPC lookups, a scanned batch correctly resolving from our own table on a second lookup rather than re-querying Open Food Facts, a manual price edit not clobbering a scanned barcode). The camera permission/scan UI itself needs manual verification in a real browser - not something a CLI agent can exercise.
 
 **Phase 7: The Frontend UI.**
 Build the Vercel-hosted React components: a Pantry dashboard (with expiry flags and price sparklines), a Recipe search/input bar, a "Ready to Cook" view, and the final Shopping List view grouped by store and sorted by aisle.

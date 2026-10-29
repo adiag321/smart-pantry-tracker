@@ -8,7 +8,10 @@ export function proxy(request: NextRequest) {
   if (
     pathname.startsWith("/login") ||
     pathname.startsWith("/api/login") ||
-    pathname.startsWith("/api/cron")
+    pathname.startsWith("/api/cron") ||
+    pathname === "/manifest.json" ||
+    pathname === "/sw.js" ||
+    pathname.startsWith("/icon")
   ) {
     return NextResponse.next();
   }
