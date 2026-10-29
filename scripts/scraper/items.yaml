@@ -1,0 +1,19 @@
+# Predefined list of regular grocery items to price-check every run (PRD
+# section 3A, step 2). Add/remove items here - no code changes needed.
+#
+# `query` is what gets typed into each store's search box. Store results are
+# location-specific (PRD section 5), so WALMART_STORE_ID / HEB_STORE_ID are
+# read from environment variables (set as GitHub Actions secrets) rather than
+# hardcoded here - see scripts/scraper/README.md for how to find your store
+# IDs.
+items:
+  - query: "whole milk gallon"
+  - query: "large eggs dozen"
+  - query: "sourdough bread"
+  - query: "unsalted butter"
+  - query: "chicken breast"
+  - query: "white rice 5lb"
+  - query: "olive oil"
+  - query: "yellow onions"
+  - query: "roma tomatoes"
+  - query: "russet potatoes"
