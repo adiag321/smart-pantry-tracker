@@ -94,10 +94,14 @@ techniques — see PRD section 5 for the full writeup.
 
 ## Phase 7: The Frontend UI
 
-- [ ] Pantry dashboard (expiry flags, price sparklines)
-- [ ] Recipe search/input bar
-- [ ] "Ready to Cook" view
-- [ ] Shopping List view (grouped by store, sorted by aisle)
+- [x] Shared `NavBar` (Pantry / Scan / Recipes / Products) in the root layout, hidden on `/login` — makes `/pantry` the de facto home screen (`/` now redirects there) instead of the leftover create-next-app boilerplate
+- [x] Pantry dashboard polish (expiry flags, price sparklines) — use-soon batches now show human-readable relative expiry ("expires in 2d" / "expired 3d ago") with a red badge instead of a raw date, plus item counts in each section heading
+- [x] Recipe search/input bar — client-side filter on `/recipes` by title or ingredient name (no new endpoint needed, `GET /api/recipes` already returns `recipe_ingredients`)
+- [x] "Ready to Cook" view — already built in Phase 5 (`/pantry`'s ready-to-cook/almost-there sections); left as-is, just restyled with counts
+- [x] Shopping List view (grouped by store, sorted by aisle) — added a per-store estimated subtotal (sum of matched products' listed price; flags how many items had no price recorded)
+- [x] Added `GET /api/recipes/[id]` (didn't exist before) so `/recipes/[id]` can actually show the recipe's title/ingredients instead of just bare "Cook"/"Shopping list" buttons with no context
+- [x] **Found and fixed a real build bug, not caught by lint or typecheck:** wrapping `NavBar` (which calls `usePathname()`) directly in the root layout broke `pnpm build` on `/recipes/[id]` — `cacheComponents: true` refuses to prerender a dynamic route when a client hook's value is read outside `<Suspense>` anywhere in its render tree, including shared layout chrome. Fixed by wrapping `<NavBar />` in a `<Suspense>` boundary in `layout.tsx`, same root cause as the earlier `/recipes/[id]` fix in Phase 4 (params via `use()`), just surfacing through a different component this time.
+- [x] Verified every page loads (200) end-to-end against the live dev server: `/`, `/pantry`, `/recipes`, `/products`, `/pantry/scan`, and `GET /api/recipes/[id]` for both a real recipe and a nonexistent one (404 with a clean error body)
 
 ---
 

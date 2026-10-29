@@ -201,6 +201,24 @@ Facts again - and that a later manual price edit didn't null out the
 scanned barcode. The camera permission/scan flow itself still needs manual
 verification in a real browser - that can't be exercised headlessly.
 
+## Frontend (Phase 7)
+
+A shared `NavBar` (Pantry / Scan / Recipes / Products) sits in the root
+layout; `/` just redirects to `/pantry`, which is the de facto home screen.
+`/recipes` now has a client-side search box filtering by title or
+ingredient, `/recipes/[id]` shows the recipe's own title/ingredients above
+the Cook/Shopping-list buttons (via a new `GET /api/recipes/[id]`), the
+shopping list shows an estimated per-store subtotal, and pantry "use soon"
+batches show relative expiry text ("expires in 2d") instead of a raw date.
+
+**Gotcha found building this:** `cacheComponents: true` refuses to
+prerender a dynamic route if a client hook's value (here, `NavBar`'s
+`usePathname()`) is read outside a `<Suspense>` boundary anywhere in the
+render tree — including shared layout chrome, not just the page itself.
+Broke `pnpm build` on `/recipes/[id]` until `<NavBar />` was wrapped in
+`<Suspense>` in `layout.tsx`. Same root cause as the Phase 4 `params`-via-`use()`
+fix, just a different component tripping it this time.
+
 ## Project structure
 
 ```
@@ -214,6 +232,7 @@ src/
     api/products/                 Upsert products + append price_history
     api/products/[id]/price-history/  Price-history series for sparklines
     api/recipes/                  DB-check-first, structured/LLM/Readability chain
+    api/recipes/[id]/             Single recipe (title/ingredients) for the detail page
     api/recipes/[id]/cook/        Per-ingredient FIFO deduction
     api/recipes/[id]/shopping-list/  Shortfall calculation, grouped by store
     api/recipes/ready-to-cook/     Reverse-match: ready / almost-there recipes
@@ -223,6 +242,7 @@ src/
     api/cron/keep-alive/          Daily Supabase keep-alive (Vercel Cron)
   components/
     Sparkline.tsx   Minimal inline-SVG price sparkline
+    NavBar.tsx      Shared nav (Pantry/Scan/Recipes/Products), hidden on /login
   lib/
     supabase/       Server-only Supabase client (admin.ts, service-role key)
     recipes/        Extraction engines: extractStructured, extractLLM,
@@ -254,14 +274,13 @@ pnpm lint    # eslint
 
 ## Status
 
-Phases 1–6 complete and verified end-to-end against live Supabase data (and,
-for Phase 6, live external services): scaffold + auth, manual price entry +
-keep-alive, recipe ingestion (all three extraction paths, all four LLM
-providers), unit conversion/FIFO deduction/shopping list, pantry
-intelligence (use-soon, ready-to-cook, price sparklines), and barcode
-logging + PWA installability. The one thing not verifiable from the CLI is
-the actual camera permission/scan flow - that needs a real browser on a
-real device. Nothing is deployed to Vercel yet — everything so far only
-runs locally. Remaining: Phase 7 (polished frontend UI - the current pages
-are minimal, built to exercise each API). See [`TASKS.md`](./TASKS.md) for
-the full phase-by-phase breakdown.
+All 7 phases complete and verified end-to-end against live Supabase data
+(and, for Phase 6, live external services): scaffold + auth, manual price
+entry + keep-alive, recipe ingestion (all three extraction paths, all four
+LLM providers), unit conversion/FIFO deduction/shopping list, pantry
+intelligence (use-soon, ready-to-cook, price sparklines), barcode logging +
+PWA installability, and a navigable frontend tying it all together. The one
+thing not verifiable from the CLI is the actual camera permission/scan flow
+- that needs a real browser on a real device. Nothing is deployed to Vercel
+yet — everything so far only runs locally; that's the only thing left. See
+[`TASKS.md`](./TASKS.md) for the full phase-by-phase breakdown.

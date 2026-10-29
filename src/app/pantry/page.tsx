@@ -22,6 +22,19 @@ type RecipeMatch = {
 
 type PriceHistory = { price: number; recorded_at: string }[];
 
+function formatExpiry(expiryDate: string | null): string {
+  if (!expiryDate) return "no expiry set";
+
+  const days = Math.round(
+    (new Date(expiryDate).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) /
+      86_400_000,
+  );
+  if (days < 0) return `expired ${Math.abs(days)}d ago`;
+  if (days === 0) return "expires today";
+  if (days === 1) return "expires tomorrow";
+  return `expires in ${days}d`;
+}
+
 export default function PantryPage() {
   const [batches, setBatches] = useState<Batch[] | null>(null);
   const [ready, setReady] = useState<RecipeMatch[]>([]);
@@ -67,7 +80,9 @@ export default function PantryPage() {
       </div>
 
       <section className="mb-8">
-        <h2 className="mb-2 font-medium">Use soon</h2>
+        <h2 className="mb-2 font-medium">
+          Use soon {batches && batches.length > 0 && `(${batches.length})`}
+        </h2>
         <ul className="divide-y rounded-lg border">
           {batches?.map((b) => (
             <li key={b.batch_id} className="flex justify-between gap-3 px-4 py-2 text-sm">
@@ -79,10 +94,14 @@ export default function PantryPage() {
               </span>
               <span className="flex items-center gap-3">
                 {sparklines[b.product_id] && <Sparkline history={sparklines[b.product_id]} />}
-                <span className={b.useSoon ? "font-medium text-red-700" : "text-neutral-500"}>
-                  {b.expiry_date
-                    ? new Date(b.expiry_date).toLocaleDateString()
-                    : "no expiry set"}
+                <span
+                  className={
+                    b.useSoon
+                      ? "rounded bg-red-100 px-2 py-0.5 font-medium text-red-700 dark:bg-red-950 dark:text-red-400"
+                      : "text-neutral-500"
+                  }
+                >
+                  {formatExpiry(b.expiry_date)}
                 </span>
               </span>
             </li>
@@ -94,7 +113,7 @@ export default function PantryPage() {
       </section>
 
       <section className="mb-8">
-        <h2 className="mb-2 font-medium">Ready to cook</h2>
+        <h2 className="mb-2 font-medium">Ready to cook {ready.length > 0 && `(${ready.length})`}</h2>
         <ul className="divide-y rounded-lg border">
           {ready.map((r) => (
             <li key={r.recipe.id} className="px-4 py-2 text-sm">
@@ -112,7 +131,9 @@ export default function PantryPage() {
       </section>
 
       <section>
-        <h2 className="mb-2 font-medium">Almost there</h2>
+        <h2 className="mb-2 font-medium">
+          Almost there {almost.length > 0 && `(${almost.length})`}
+        </h2>
         <ul className="divide-y rounded-lg border">
           {almost.map((r) => (
             <li key={r.recipe.id} className="px-4 py-2 text-sm">

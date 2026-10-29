@@ -22,6 +22,7 @@ export default function RecipesPage() {
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
 
   async function loadRecipes() {
     const res = await fetch("/api/recipes");
@@ -57,6 +58,17 @@ export default function RecipesPage() {
     loadRecipes();
   }
 
+  const query = search.trim().toLowerCase();
+  const visibleRecipes = query
+    ? recipes.filter(
+        (r) =>
+          r.title.toLowerCase().includes(query) ||
+          r.recipe_ingredients.some((i) =>
+            i.standardized_name.toLowerCase().includes(query),
+          ),
+      )
+    : recipes;
+
   return (
     <main className="mx-auto max-w-2xl p-6">
       <h1 className="mb-1 text-lg font-semibold">Recipes</h1>
@@ -84,9 +96,17 @@ export default function RecipesPage() {
       </form>
       {error && <p className="mb-6 text-sm text-red-600">{error}</p>}
 
-      <h2 className="mb-2 font-medium">Saved recipes</h2>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h2 className="font-medium">Saved recipes</h2>
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by title or ingredient…"
+          className="w-56 rounded border px-3 py-1.5 text-sm"
+        />
+      </div>
       <ul className="flex flex-col gap-3">
-        {recipes.map((r) => (
+        {visibleRecipes.map((r) => (
           <li key={r.id} className="rounded-lg border p-4">
             <div className="flex items-baseline justify-between gap-2">
               <Link href={`/recipes/${r.id}`} className="font-medium underline">
@@ -109,6 +129,9 @@ export default function RecipesPage() {
             </p>
           </li>
         ))}
+        {visibleRecipes.length === 0 && recipes.length > 0 && (
+          <li className="text-sm text-neutral-500">No recipes match &quot;{search}&quot;.</li>
+        )}
         {recipes.length === 0 && (
           <li className="text-sm text-neutral-500">No recipes saved yet.</li>
         )}

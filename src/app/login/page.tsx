@@ -24,7 +24,7 @@ function LoginForm() {
       return;
     }
 
-    router.push(searchParams.get("redirectTo") ?? "/");
+    router.push(searchParams.get("redirectTo") ?? "/pantry");
     router.refresh();
   }
 
