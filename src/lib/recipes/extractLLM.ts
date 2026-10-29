@@ -119,7 +119,7 @@ async function tryNvidia(pageText: string): Promise<ParsedRecipe | null> {
   const { default: OpenAI } = await import("openai");
   const client = new OpenAI({ apiKey, baseURL: "https://integrate.api.nvidia.com/v1" });
   const completion = await client.chat.completions.create({
-    model: process.env.NVIDIA_MODEL || "nvidia/nemotron-3-super-120b-a12b",
+    model: process.env.NVIDIA_MODEL || "openai/gpt-oss-20b",
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: buildUserPrompt(pageText) },

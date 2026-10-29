@@ -101,10 +101,12 @@ token.
      limit, succeeds on most recipe sites.
    - **LLM fallback** (`extractLLM.ts`) — tries Groq, then Gemini, then
      OpenRouter, then NVIDIA NIM, skipping any provider without an API key
-     configured. Groq/Gemini/OpenRouter are confirmed working against real
-     keys; NVIDIA NIM authenticates but can't invoke any model for this
-     account ("Function not found for account") — looks like an
-     entitlement/credits issue on NVIDIA's side, not a code bug.
+     configured. All four confirmed working against real keys. NVIDIA NIM
+     has a quirk worth knowing: it grants invocation access per-model, not
+     account-wide — a key only works for whichever model's page on
+     build.nvidia.com you clicked "Get API Key" from (ours is scoped to
+     `openai/gpt-oss-20b`; other models 404 with "Function not found for
+     account" even though they're in the same account's model listing).
    - **Readability fallback** (`extractReadability.ts`) — `@mozilla/readability`
      + `jsdom` for clean article text, splitting on "Ingredients"/"Instructions"
      headings when present.
@@ -150,7 +152,7 @@ pnpm lint    # eslint
 Phase 1 (Supabase & Next.js scaffold) complete. Phase 2 (manual price entry
 + keep-alive) complete and verified. Phase 3 (recipe ingestion) complete and
 fully verified — structured, LLM (Groq/Gemini/OpenRouter), and Readability
-paths all confirmed working against real requests. NVIDIA NIM is wired up
-but not working yet (account-side issue on NVIDIA's end, not code). Nothing
+paths all confirmed working against real requests, all four LLM providers
+included (Groq, Gemini, OpenRouter, NVIDIA NIM). Nothing
 is deployed to Vercel yet — everything so far only runs locally. See
 [`TASKS.md`](./TASKS.md) for the full phase-by-phase breakdown.
