@@ -60,7 +60,7 @@ async function tryGroq(pageText: string): Promise<ParsedRecipe | null> {
   const { default: Groq } = await import("groq-sdk");
   const client = new Groq({ apiKey });
   const completion = await client.chat.completions.create({
-    model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+    model: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
@@ -79,7 +79,7 @@ async function tryGemini(pageText: string): Promise<ParsedRecipe | null> {
   const { GoogleGenAI } = await import("@google/genai");
   const ai = new GoogleGenAI({ apiKey });
   const response = await ai.models.generateContent({
-    model: process.env.GEMINI_MODEL || "gemini-flash-latest",
+    model: process.env.GEMINI_MODEL || "gemini-flash-lite-latest",
     contents: buildUserPrompt(pageText),
     config: {
       systemInstruction: SYSTEM_PROMPT,
@@ -90,23 +90,44 @@ async function tryGemini(pageText: string): Promise<ParsedRecipe | null> {
   return response.text ? parseModelJson(response.text) : null;
 }
 
-async function tryMistral(pageText: string): Promise<ParsedRecipe | null> {
-  const apiKey = process.env.MISTRAL_API_KEY;
+async function tryOpenRouter(pageText: string): Promise<ParsedRecipe | null> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return null;
 
-  const { Mistral } = await import("@mistralai/mistralai");
-  const client = new Mistral({ apiKey });
-  const result = await client.chat.complete({
-    model: process.env.MISTRAL_MODEL || "mistral-small-latest",
-    responseFormat: { type: "json_object" },
+  const { default: OpenAI } = await import("openai");
+  const client = new OpenAI({ apiKey, baseURL: "https://openrouter.ai/api/v1" });
+  const completion = await client.chat.completions.create({
+    // "openrouter/free" randomly routes across OpenRouter's free-tier model
+    // pool, so this default doesn't go stale when any one free model is
+    // deprecated - override via OPENROUTER_MODEL to pin a specific one.
+    model: process.env.OPENROUTER_MODEL || "openrouter/free",
+    response_format: { type: "json_object" },
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: buildUserPrompt(pageText) },
     ],
   });
 
-  const content = result.choices?.[0]?.message?.content;
-  return typeof content === "string" ? parseModelJson(content) : null;
+  const content = completion.choices[0]?.message?.content;
+  return content ? parseModelJson(content) : null;
+}
+
+async function tryNvidia(pageText: string): Promise<ParsedRecipe | null> {
+  const apiKey = process.env.NVIDIA_API_KEY;
+  if (!apiKey) return null;
+
+  const { default: OpenAI } = await import("openai");
+  const client = new OpenAI({ apiKey, baseURL: "https://integrate.api.nvidia.com/v1" });
+  const completion = await client.chat.completions.create({
+    model: process.env.NVIDIA_MODEL || "nvidia/nemotron-3-super-120b-a12b",
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: buildUserPrompt(pageText) },
+    ],
+  });
+
+  const content = completion.choices[0]?.message?.content;
+  return content ? parseModelJson(content) : null;
 }
 
 // Tries every LLM provider that has an API key configured, in order, and
@@ -114,7 +135,7 @@ async function tryMistral(pageText: string): Promise<ParsedRecipe | null> {
 // limited) returns null so the caller falls through to the Readability
 // extractor - this is the fallback step, not the primary extraction path.
 export async function extractLLM(pageText: string): Promise<ParsedRecipe | null> {
-  const providers = [tryGroq, tryGemini, tryMistral];
+  const providers = [tryGroq, tryGemini, tryOpenRouter, tryNvidia];
 
   for (const provider of providers) {
     try {

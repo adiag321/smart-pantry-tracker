@@ -10,8 +10,9 @@ Day-to-day progress is tracked in [`TASKS.md`](./TASKS.md).
 
 Next.js (App Router, TypeScript) · Supabase (Postgres) · Tailwind CSS ·
 Vercel Cron (daily Supabase keep-alive) · `convert-units` for unit
-conversion · `cheerio`/`@mozilla/readability`/`jsdom` + Groq/Gemini/Mistral
-SDKs for recipe extraction.
+conversion · `cheerio`/`@mozilla/readability`/`jsdom` + Groq/Gemini/OpenRouter/NVIDIA NIM
+for recipe extraction (last two via the `openai` SDK with a custom `baseURL`,
+both being OpenAI-compatible).
 
 Single-user app: there's no Supabase Auth / multi-tenant login, just one
 shared password gated by `src/proxy.ts`.
@@ -99,7 +100,11 @@ token.
      parses schema.org `Recipe` JSON-LD via `cheerio`. No API cost, no rate
      limit, succeeds on most recipe sites.
    - **LLM fallback** (`extractLLM.ts`) — tries Groq, then Gemini, then
-     Mistral, skipping any provider without an API key configured.
+     OpenRouter, then NVIDIA NIM, skipping any provider without an API key
+     configured. Groq/Gemini/OpenRouter are confirmed working against real
+     keys; NVIDIA NIM authenticates but can't invoke any model for this
+     account ("Function not found for account") — looks like an
+     entitlement/credits issue on NVIDIA's side, not a code bug.
    - **Readability fallback** (`extractReadability.ts`) — `@mozilla/readability`
      + `jsdom` for clean article text, splitting on "Ingredients"/"Instructions"
      headings when present.
@@ -144,7 +149,8 @@ pnpm lint    # eslint
 
 Phase 1 (Supabase & Next.js scaffold) complete. Phase 2 (manual price entry
 + keep-alive) complete and verified. Phase 3 (recipe ingestion) complete and
-verified for the structured + Readability paths; LLM fallback is built but
-untested against a live provider (no API key configured yet). Nothing is
-deployed to Vercel yet — everything so far only runs locally. See
+fully verified — structured, LLM (Groq/Gemini/OpenRouter), and Readability
+paths all confirmed working against real requests. NVIDIA NIM is wired up
+but not working yet (account-side issue on NVIDIA's end, not code). Nothing
+is deployed to Vercel yet — everything so far only runs locally. See
 [`TASKS.md`](./TASKS.md) for the full phase-by-phase breakdown.
